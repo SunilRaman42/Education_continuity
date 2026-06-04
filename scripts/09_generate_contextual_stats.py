@@ -22,12 +22,10 @@ INDICATOR_MAP = {
     }
 }
 
-# Key demographics factors if missing from CSV
-# BFA Specific proxies as fallback
+# Standard demographic proxies (Fallback if WB API fails)
 DEMO_PROXIES = {
-    "primary_age_ratio": 0.172,  # 6-11 years share of total pop
-    "adol_age_ratio":    0.079,  # 12-14 years share of total pop
-    "female_share":       0.50
+    "primary_age_ratio": 0.17,  # Primary school age share
+    "female_share":      0.50
 }
 
 # ─── Data Helpers ─────────────────────────────────────────────────────────────
@@ -44,6 +42,24 @@ def get_growth_rates(iso3):
     except Exception as e:
         print(f"  ⚠ Growth rate fetch failed: {e}. Using fallback 2.3%.")
     return {}
+
+def get_demographic_ratios(iso3):
+    """Fetch % of population under 14 to estimate primary age (6-11) ratio."""
+    print(f"  → Fetching population age structure from World Bank for {iso3}...")
+    ratios = DEMO_PROXIES.copy()
+    try:
+        # SP.POP.0014.TO.ZS: Population ages 0-14 (% of total population)
+        url = f"https://api.worldbank.org/v2/country/{iso3}/indicator/SP.POP.0014.TO.ZS?format=json&per_page=1&mrv=1"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        if len(data) > 1 and data[1]:
+            val = float(data[1][0]['value']) / 100
+            # Rough humanitarian proxy: 0-14 group is roughly twice the size of the 6-11 group in LMICs
+            ratios["primary_age_ratio"] = round(val / 2.3, 3) 
+            print(f"    ✓ Primary age (6-11) estimated at {ratios['primary_age_ratio']*100:.1f}% of total pop.")
+    except Exception as e:
+        print(f"  ⚠ Age ratio fetch failed: {e}. Using standard proxy.")
+    return ratios
 
 def fetch_yearly_indicators(iso3, years, csv_path):
     """Extract national indicator values for each year."""
@@ -115,7 +131,7 @@ def aggregate_anchor_pop(iso3, provinces):
 
 def generate():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--iso3", default="BFA")
+    parser.add_argument("--iso3", default=os.environ.get("PIPELINE_ISO3", "BFA"))
     parser.add_argument("--start", type=int, default=2015)
     parser.add_argument("--end", type=int, default=2026)
     args = parser.parse_args()
@@ -129,6 +145,7 @@ def generate():
     provinces = load_provinces(iso3)
     provinces = aggregate_anchor_pop(iso3, provinces)
     rates = get_growth_rates(iso3)
+    ratios = get_demographic_ratios(iso3)
     indicators = fetch_yearly_indicators(iso3, years, "data/clean/education/master_education.csv")
     
     default_growth = 0.023
@@ -156,18 +173,16 @@ def generate():
         for yr in years:
             total_pop = pop_history[yr]
             
-            # Apply demographic sub-factors
-            # Note: In a future version, these ratios could also be fetched from CSV
-            primary_pop = total_pop * DEMO_PROXIES["primary_age_ratio"]
+            # Apply dynamic demographic factors
+            primary_pop = total_pop * ratios["primary_age_ratio"]
             
             yr_inds = indicators.get(yr, {})
             oos_rates = yr_inds.get("primary_oos", {})
             enr_rates = yr_inds.get("primary_enrollment", {})
 
-            # Default rates if missing for that year
-            # We use the most recent available or the national average
-            def_oos = oos_rates.get("total", 0.28) # BFA average
-            def_enr = enr_rates.get("total", 0.87)
+            # Default rates if missing for that year (using LMIC humanitarian benchmarks)
+            def_oos = oos_rates.get("total", 0.18) 
+            def_enr = enr_rates.get("total", 0.85)
 
             final_output[p_name][yr] = {
                 "population": {
@@ -177,13 +192,13 @@ def generate():
                 "sex_disaggregated": {
                     "primary_oos": {
                         "total":  round(primary_pop * def_oos),
-                        "female": round((primary_pop * DEMO_PROXIES["female_share"]) * oos_rates.get("female", def_oos)),
-                        "male":   round((primary_pop * (1-DEMO_PROXIES["female_share"])) * oos_rates.get("male", def_oos))
+                        "female": round((primary_pop * ratios["female_share"]) * oos_rates.get("female", def_oos)),
+                        "male":   round((primary_pop * (1-ratios["female_share"])) * oos_rates.get("male", def_oos))
                     },
                     "primary_enrolled": {
                         "total":  round(primary_pop * def_enr),
-                        "female": round((primary_pop * DEMO_PROXIES["female_share"]) * enr_rates.get("female", def_enr)),
-                        "male":   round((primary_pop * (1-DEMO_PROXIES["female_share"])) * enr_rates.get("male", def_enr))
+                        "female": round((primary_pop * ratios["female_share"]) * enr_rates.get("female", def_enr)),
+                        "male":   round((primary_pop * (1-ratios["female_share"])) * enr_rates.get("male", def_enr))
                     }
                 }
             }

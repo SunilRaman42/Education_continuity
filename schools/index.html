@@ -225,7 +225,7 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
 .detail-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: 10px 20px 18px;
   text-align: center;
 }
 
@@ -275,6 +275,54 @@ html, body { height: 100%; background: var(--bg); color: var(--ink); font-family
   border-radius: 6px;
   padding: 10px 12px;
 }
+
+/* Redesigned Sidebar KPI */
+.metric-split {
+  grid-column: span 3;
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.split-rows {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+.split-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.split-num {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.1;
+}
+.split-source {
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.metric-label-integrated {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(26,20,16,0.1);
+}
+
 .metric-val {
   font-family: var(--serif);
   font-size: 20px;
@@ -530,6 +578,7 @@ const SCORE_URL    = `${ARTIFACTS_PATH}/school_vulnerability_scores.json`;
 const PROV_STATS_URL = `${ARTIFACTS_PATH}/province_at_risk_stats.json`;
 const VULN_CSV_URL   = `${ARTIFACTS_PATH}/schools/${ISO3}_school_vulnerability.csv`;
 const RISK_TRAJECTORY_URL = `${ARTIFACTS_PATH}/province_school_risk.json`;
+const CONTEXTUAL_STATS_URL = `${ARTIFACTS_PATH}/contextual_stats.json`;
 
 const TIER_COLORS = {
   critical: "#8B1A1A",
@@ -563,11 +612,14 @@ let scoreData       = [];
 let schoolsData     = null;
 let provinceStats   = null;
 let riskTrajectory  = null;
+let contextualData  = null;
+let provincialData  = null; // Global storage for provincial trends
 let vulnMap         = {}; // To store detailed conflict/fragility metrics
 let selectedLayer   = null;
 let riskChart       = null;
 let currentYear     = 2024;
 let currentProvince = null;
+let activeSchool    = null; // Track active school for re-rendering on year change
 
 function parseCSVLine(text) {
     const result = [];
@@ -598,6 +650,89 @@ function updateNavLinks() {
   if (sLink) sLink.href = summaryUrl;
 }
 
+function updateSidebarDetail(props) {
+    const name = props.admin2 || "Unknown";
+    const stats = provinceStats[currentYear] || {};
+    const provData = stats[name] || { count: 0 };
+    const schoolsPer1k = props.schools_per_1000 ?? 0;
+
+    // Sidecar Context (indicators from contextualData)
+    const ctxProv = contextualData ? contextualData[name] : null;
+    const ctxYear = ctxProv ? ctxProv[currentYear] : null;
+
+    let contextHTML = '';
+    if (ctxYear) {
+      const pop = ctxYear.population;
+      const oos = ctxYear.sex_disaggregated.primary_oos;
+      const ger = props.enrolment_raw ? `${props.enrolment_raw.toFixed(0)}%` : "—";
+
+      contextHTML = `
+        <details class="settings-toggle" style="margin-top:20px; border-top: 1px solid var(--border); padding-top:16px;">
+          <summary style="font-size:10px; color: var(--ink); list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <span style="font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 500;">Systemic Context</span>
+            <span class="disclaimer-tag" style="font-size:7px; background:rgba(0,0,0,0.05); padding:1px 4px; border-radius:2px; text-transform:uppercase;">Estimates</span>
+          </summary>
+          <div class="settings-content" style="padding-top:14px;">
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-bottom:10px;">
+               <div style="text-align:center;">
+                 <div style="font-family:var(--serif); font-size:15px; font-weight:700; color: var(--ink);">${pop.primary_age.toLocaleString()}</div>
+                 <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px;">Age 6-11</div>
+               </div>
+               <div style="text-align:center;" title="Out of School: Children of primary school age not enrolled in education.">
+                 <div style="font-family:var(--serif); font-size:15px; font-weight:700; color:var(--accent);">${oos.total.toLocaleString()}</div>
+                 <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px; border-bottom:1px dotted #ccc; display:inline-block; cursor:help;">OOS Total</div>
+               </div>
+               <div style="text-align:center;" title="Gross Enrolment Ratio: Total enrolment in primary education regardless of age.">
+                 <div style="font-family:var(--serif); font-size:15px; font-weight:700; color: #B8860B;">${ger}</div>
+                 <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px; border-bottom:1px dotted #ccc; display:inline-block; cursor:help;">GER</div>
+               </div>
+            </div>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; border-top: 1px dashed var(--border); padding-top:10px;">
+               <div style="background: rgba(232, 63, 111, 0.04); padding: 6px; border-radius: 4px; text-align:center;">
+                  <div style="font-family:var(--mono); font-size:11px; font-weight:700; color: #E83F6F;">${oos.female.toLocaleString()}</div>
+                  <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px;">Female OOS</div>
+               </div>
+               <div style="background: rgba(28, 171, 226, 0.04); padding: 6px; border-radius: 4px; text-align:center;">
+                  <div style="font-family:var(--mono); font-size:11px; font-weight:700; color: #1CABE2;">${oos.male.toLocaleString()}</div>
+                  <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px;">Male OOS</div>
+               </div>
+            </div>
+            
+            <p style="margin-top:12px; font-size:8px; font-family:var(--sans); font-style:italic; color:var(--ink-muted); opacity: 0.8; line-height:1.3; text-align:left;">
+              Values are primary school proxies derived from WorldPop density grids and UNESCO national benchmarks extrapolated to ${currentYear}.
+            </p>
+          </div>
+        </details>
+      `;
+    }
+
+    document.getElementById("detailPanel").innerHTML = `
+      <div class="panel-label">Province detail</div>
+      <div class="detail-name">${name}</div>
+      <div class="detail-metrics">
+        <div class="metric">
+          <div class="metric-val">${props.school_count || 0}</div>
+          <div class="metric-label">Total Schools</div>
+        </div>
+        <div class="metric">
+          <div class="metric-val">${schoolsPer1k.toFixed(1)}</div>
+          <div class="metric-label">Schools / 1k</div>
+        </div>
+        ${provData.count > 0 ? `
+        <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(name)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
+          <div class="metric-val" style="color: var(--tier-critical); font-weight: bold;">${provData.count}</div>
+          <div class="metric-label" style="text-decoration:underline;">At-Risk</div>
+        </a>` : `
+        <div class="metric">
+          <div class="metric-val">0</div>
+          <div class="metric-label">At-Risk</div>
+        </div>`}
+      </div>
+      ${contextHTML}
+    `;
+}
+
 async function init() {
   const urlParams = new URLSearchParams(window.location.search);
   const yearParam = urlParams.get('year');
@@ -611,19 +746,22 @@ async function init() {
   updateNavLinks();
 
   try {
-    const [geoRes, schoolsRes, scoreRes, provStatsRes, vulnCsvRes, riskTrajRes] = await Promise.all([
+    const [geoRes, schoolsRes, scoreRes, provStatsRes, vulnCsvRes, riskTrajRes, contextRes] = await Promise.all([
       fetch(GEOJSON_URL).then(r => r.json()),
       fetch(SCHOOLS_URL).then(r => r.json()),
       fetch(SCORE_URL).then(r => r.json()),
       fetch(PROV_STATS_URL).then(r => r.json()),
       fetch(VULN_CSV_URL).then(r => r.text()),
-      fetch(RISK_TRAJECTORY_URL).then(r => r.json())
+      fetch(RISK_TRAJECTORY_URL).then(r => r.json()),
+      fetch(CONTEXTUAL_STATS_URL).then(r => r.json()).catch(() => ({}))
     ]);
 
     scoreData = scoreRes;
     schoolsData = schoolsRes;
     provinceStats = provStatsRes;
     riskTrajectory = riskTrajRes;
+    contextualData = contextRes;
+    provincialData = geoRes;
 
     updateDiscoveryFeed(schoolsData);
     
@@ -704,34 +842,7 @@ async function init() {
 
             updateNavLinks();
             updateRiskChart(currentProvince);
-
-            const stats = provinceStats[currentYear] || {};
-            const provData = stats[f.properties.admin2] || { count: 0 };
-            const schoolsPer1k = f.properties.schools_per_1000 ?? 0;
-            
-            document.getElementById("detailPanel").innerHTML = `
-              <div class="panel-label">Province detail</div>
-              <div class="detail-name">${f.properties.admin2}</div>
-              <div class="detail-metrics">
-                <div class="metric">
-                  <div class="metric-val">${f.properties.school_count || 0}</div>
-                  <div class="metric-label">Total Schools</div>
-                </div>
-                <div class="metric">
-                  <div class="metric-val">${schoolsPer1k.toFixed(1)}</div>
-                  <div class="metric-label">Schools / 1k</div>
-                </div>
-                ${provData.count > 0 ? `
-                <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(f.properties.admin2)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
-                  <div class="metric-val" style="color: var(--tier-critical); font-weight: bold;">${provData.count}</div>
-                  <div class="metric-label" style="text-decoration:underline;">At-Risk</div>
-                </a>` : `
-                <div class="metric">
-                  <div class="metric-val">0</div>
-                  <div class="metric-label">At-Risk</div>
-                </div>`}
-              </div>
-            `;
+            updateSidebarDetail(f.properties);
 
             // Update URL without reload
             const newUrl = new URL(window.location);
@@ -766,34 +877,7 @@ async function init() {
         selectedLayer = match;
         match.setStyle({ weight: 3, color: "#1A1410" });
         
-        // Populate sidebar manually for initial load
-        const stats = provinceStats[currentYear] || {};
-        const provData = stats[currentProvince] || { count: 0 };
-        const schoolsPer1k = match.feature.properties.schools_per_1000 ?? 0;
-        
-        document.getElementById("detailPanel").innerHTML = `
-          <div class="panel-label">Province detail</div>
-          <div class="detail-name">${currentProvince}</div>
-          <div class="detail-metrics">
-            <div class="metric">
-              <div class="metric-val">${match.feature.properties.school_count || 0}</div>
-              <div class="metric-label">Total Schools</div>
-            </div>
-            <div class="metric">
-              <div class="metric-val">${schoolsPer1k.toFixed(1)}</div>
-              <div class="metric-label">Schools / 1k</div>
-            </div>
-            ${provData.count > 0 ? `
-            <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(currentProvince)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
-              <div class="metric-val" style="color: var(--tier-critical); font-weight: bold;">${provData.count}</div>
-              <div class="metric-label" style="text-decoration:underline;">At-Risk</div>
-            </a>` : `
-            <div class="metric">
-              <div class="metric-val">0</div>
-              <div class="metric-label">At-Risk</div>
-            </div>`}
-          </div>
-        `;
+        updateSidebarDetail(match.feature.properties);
         updateRiskChart(currentProvince);
         map.fitBounds(match.getBounds(), { padding: [20, 20], maxZoom: 10 });
       }
@@ -821,40 +905,18 @@ async function init() {
         if (match) {
             selectedLayer = match;
             match.setStyle({ weight: 3, color: "#1A1410" });
-            // Re-trigger the sidebar update manually to avoid infinite recursion or event issues
-            const stats = provinceStats[currentYear] || {};
-            const provData = stats[match.feature.properties.admin2] || { count: 0 };
-            const schoolsPer1k = match.feature.properties.schools_per_1000 ?? 0;
-            
-            document.getElementById("detailPanel").innerHTML = `
-              <div class="panel-label">Province detail</div>
-              <div class="detail-name">${match.feature.properties.admin2}</div>
-              <div class="detail-metrics">
-                <div class="metric">
-                  <div class="metric-val">${match.feature.properties.school_count || 0}</div>
-                  <div class="metric-label">Total Schools</div>
-                </div>
-                <div class="metric">
-                  <div class="metric-val">${schoolsPer1k.toFixed(1)}</div>
-                  <div class="metric-label">Schools / 1k</div>
-                </div>
-                ${provData.count > 0 ? `
-                <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(match.feature.properties.admin2)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
-                  <div class="metric-val" style="color: var(--tier-critical); font-weight: bold;">${provData.count}</div>
-                  <div class="metric-label" style="text-decoration:underline;">At-Risk</div>
-                </a>` : `
-                <div class="metric">
-                  <div class="metric-val">0</div>
-                  <div class="metric-label">At-Risk</div>
-                </div>`}
-              </div>
-            `;
+            updateSidebarDetail(match.feature.properties);
         }
       }
 
       renderSchools(schoolsData);
       updateGlobalStats();
       updateRiskChart(currentProvince || "National");
+      
+      // Re-render school detail if active
+      if (activeSchool) {
+        showSchoolDetail(activeSchool.props, activeSchool.latlng);
+      }
     });
 
     // GLOBAL RESET: Clicking outside map/sidebar resets view
@@ -899,6 +961,7 @@ function resetSelection() {
   const oldLayer = selectedLayer;
   currentProvince = null;
   selectedLayer = null;
+  activeSchool = null; // Clear active school state
 
   if (oldLayer && choroplethLayer.hasLayer(oldLayer)) {
     choroplethLayer.resetStyle(oldLayer);
@@ -1051,7 +1114,7 @@ function renderSchools(geo) {
         return Math.abs(sLat - latlng.lat) < 0.0001 && Math.abs(sLon - latlng.lng) < 0.0001;
       });
       
-      let color = "#D2B4DE", radius = 3, isAtRisk = false, tier = "Stable", trauma = 0;
+      let color = "#D2B4DE", radius = 3, isAtRisk = false, tier = "Stable", trauma = 0, currentRiskScore = 0;
       
       const isDiscovery = f.properties.is_discovery === true;
 
@@ -1060,14 +1123,17 @@ function renderSchools(geo) {
         radius = currentZoom < 8 ? 1.5 : (currentZoom < 10 ? 3 : 5);
         tier = "New Discovery";
       } else if (schoolScore) {
-        trauma = schoolScore.trauma || 0;
+        currentRiskScore = schoolScore.yearly_scores[currentYear] || 0;
+        // Cumulative trauma up to this point in time
+        trauma = (schoolScore.at_risk_years || []).filter(y => y <= currentYear).length;
         isAtRisk = (schoolScore.at_risk_years || []).includes(currentYear);
+        
         if (isAtRisk) {
-          if (schoolScore.v_score > 0.7) {
+          if (currentRiskScore > 0.7) {
             color = TIER_COLORS.critical; // #8B1A1A
             radius = 8;
             tier = "Critical Risk";
-          } else if (schoolScore.v_score > 0.4) {
+          } else if (currentRiskScore > 0.4) {
             color = TIER_COLORS.high; // #E07B3B
             radius = 6;
             tier = "High Risk";
@@ -1098,10 +1164,30 @@ function renderSchools(geo) {
 
       const tooltipContent = `
         <div style="font-family:IBM Plex Sans, sans-serif; font-size:11px; line-height:1.4;">
-          <strong>${prefix}${f.properties.name || 'Unnamed Institution'}</strong><br/>
-          <div style="font-size:9px; color:#6B6259; font-family:IBM Plex Mono;">${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}</div>
-          <span style="color:${color}; font-weight:bold; font-size:10px; text-transform:uppercase;">${tier}</span>
-          ${trauma > 0 ? `<br/><span style="color:#6B6259;">Conflict History: ${trauma} Years</span>` : ''}
+          <div style="text-transform:uppercase; font-size:8px; font-family:IBM Plex Mono; color:${color}; font-weight:bold; margin-bottom:2px;">${prefix}${tier}</div>
+          <strong style="font-size:12px;">${f.properties.school_name || f.properties.name || "Unnamed Site"}</strong><br/>
+          <span style="color:#6B6259;">${f.properties.admin2 || "Unknown Province"}</span>
+          <hr style="border:0; border-top:1px dashed #eee; margin:8px 0;"/>
+          
+          ${isDiscovery ? `
+             <div style="background:#e0f7fa; padding:5px; border-radius:3px; color:#006064; font-size:9px;">
+               This site was manually added via field notes and is being monitored for infrastructure integrity.
+             </div>
+          ` : `
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+             <div>
+               <div style="font-size:14px; font-weight:bold; color:${color}">${currentRiskScore.toFixed(2)}</div>
+               <div style="font-size:8px; text-transform:uppercase; color:#6B6259;">Risk Score</div>
+             </div>
+             <div>
+               <div style="font-size:14px; font-weight:bold;">${trauma}</div>
+               <div style="font-size:8px; text-transform:uppercase; color:#6B6259;">Trauma Index</div>
+             </div>
+          </div>
+          <div style="margin-top:8px; font-size:8px; color:#6B6259; font-style:italic;">
+             ${isAtRisk ? `● School is flagged as <b>AT-RISK</b> in ${currentYear}` : `○ School status: Stable in ${currentYear}`}
+          </div>
+          `}
           ${fieldNoteHTML}
         </div>
       `;
@@ -1121,6 +1207,9 @@ function renderSchools(geo) {
 
 function showSchoolDetail(props, latlng) {
   try {
+    // Store for re-rendering on year change
+    activeSchool = { props, latlng };
+
     const score = scoreData.find(s => {
       const sLat = s.lat || s.latitude;
       const sLon = s.lon || s.longitude;
@@ -1135,10 +1224,35 @@ function showSchoolDetail(props, latlng) {
     const detailed = vulnMap[`${latKey},${lonKey}`] || { conflict: 0, fragility: 0 };
 
     const name = props.name || "Unnamed Institution";
-    const v_score = score ? (score.v_score * 100).toFixed(0) : "N/A";
-    const trauma = score ? score.trauma : 0;
+    // YEAR SPECIFIC SCORE AND TRAUMA
+    const currentRiskVal = score ? (score.yearly_scores[currentYear] || 0) : 0;
+    const v_score_display = (currentRiskVal * 100).toFixed(0);
+    const currentTrauma = score ? (score.at_risk_years || []).filter(y => y <= currentYear).length : 0;
+    
     const province = score ? (score.province || "Unknown") : "Discovered Location";
-    const years = score ? (score.at_risk_years || []) : [];
+
+    // 1. Try Site-Specific Metrics (calculated in 06_4)
+    // 2. Fall back to Provincial Metrics
+    const yearMetrics = (score && score.yearly_metrics) ? score.yearly_metrics[currentYear] : null;
+
+    let displayConflict = 0;
+    let displayFragility = 0;
+    let displayEVI = 0;
+
+    if (yearMetrics) {
+      displayConflict = yearMetrics.conflict_score;
+      displayFragility = yearMetrics.fragility_score;
+      displayEVI = yearMetrics.final_score;
+    } else if (provincialData && province !== "Unknown") {
+      const feat = provincialData.features.find(f => 
+        f.properties.admin2 === province && f.properties.year === currentYear
+      );
+      if (feat) {
+        displayConflict = feat.properties.conflict_score;
+        displayFragility = feat.properties.density_fragility;
+        displayEVI = feat.properties.score;
+      }
+    }
 
     const status = String(props.field_status || "Unknown");
     const statusColor = status === "Open" ? "#2e7d32" : (status === "Closed" ? "#d32f2f" : "#f57c00");
@@ -1151,24 +1265,27 @@ function showSchoolDetail(props, latlng) {
       <div class="detail-name">${name}</div>
       <div class="panel-label" style="margin-top:4px;">${province}</div>
       <div class="detail-metrics">
-        <div class="metric"><div class="metric-val">${v_score}%</div><div class="metric-label">Memory Risk</div></div>
-        <div class="metric"><div class="metric-val">${trauma} Years</div><div class="metric-label">History</div></div>
-        <div class="metric" style="background: rgba(210,180,222,0.1); border: 1px solid rgba(210,180,222,0.2);">
-          <div class="metric-val">${detailed.final.toFixed(2)}</div>
-          <div class="metric-label">Site EVI</div>
-        </div>
+        <div class="metric"><div class="metric-val">${v_score_display}%</div><div class="metric-label">Risk Level</div></div>
+        <div class="metric"><div class="metric-val">${currentTrauma} Years</div><div class="metric-label">Trauma</div></div>
       </div>
 
-      <div class="panel-label" style="margin-top:10px; margin-bottom:6px">Site Level Metrics</div>
+      <div class="panel-label" style="margin-top:10px; margin-bottom:6px">Site Level Metrics (${currentYear})</div>
       <div class="detail-metrics" style="grid-template-columns: 1fr 1fr; gap: 8px;">
         <div class="metric" style="padding: 8px;">
-          <div class="metric-val" style="font-size: 16px;">${detailed.conflict.toFixed(2)}</div>
+          <div class="metric-val" style="font-size: 16px;">${displayConflict.toFixed(2)}</div>
           <div class="metric-label">Conflict</div>
         </div>
         <div class="metric" style="padding: 8px;">
-          <div class="metric-val" style="font-size: 16px;">${detailed.fragility.toFixed(2)}</div>
+          <div class="metric-val" style="font-size: 16px;">${displayFragility.toFixed(2)}</div>
           <div class="metric-label">Fragility</div>
         </div>
+      </div>
+
+      <div class="ai-box" id="aiBox" style="margin-top: 16px; display: none;">
+        <div class="ai-label">Infrastructure Impact</div>
+        <div class="ai-text" id="aiText" style="text-align: left;">Generating analysis...</div>
+        <div class="ai-disclaimer" id="aiDisclaimer" style="font-family: var(--mono); font-size: 8px; color: var(--ink-muted); margin-top: 8px; text-align: right; text-transform: uppercase;">System Rationale</div>
+      </div>
       </div>
 
       ${props.field_note ? `
@@ -1185,6 +1302,8 @@ function showSchoolDetail(props, latlng) {
         </div>
       ` : ''}
     `;
+
+    generateSituationBriefing(props, score);
 
   } catch (err) {
     console.error("Error in showSchoolDetail:", err, props);
@@ -1244,6 +1363,78 @@ function updateDiscoveryFeed(geo) {
     });
   } catch (err) {
     console.error("Error in updateDiscoveryFeed:", err);
+  }
+}
+
+
+async function generateSituationBriefing(props, score) {
+  const name = props.school_name || props.name || "this institution";
+  const province = score ? (score.province || "Unknown") : "Unknown";
+  const year = currentYear;
+  const cacheKey = `sch-${name}-${year}`;
+  
+  const boxEl = document.getElementById("aiBox");
+  const textEl = document.getElementById("aiText");
+  const disclaimerEl = document.getElementById("aiDisclaimer");
+  
+  if (!boxEl || !textEl) return;
+  boxEl.style.display = "block";
+  textEl.classList.add("loading");
+
+  const sessionKey = sessionStorage.getItem("GEMINI_API_KEY");
+
+  // Fallback: Strict Education/Infrastructure Rationale
+  if (!sessionKey || sessionKey.length < 10) {
+    const ctxProv = contextualData ? contextualData[province] : null;
+    const ctxYear = ctxProv ? ctxProv[year] : null;
+    
+    let eduNote = "";
+    if (ctxYear) {
+      const oos = ctxYear.sex_disaggregated.primary_oos;
+      eduNote = ` This facility operates in a region where ${oos.total.toLocaleString()} children are currently out of school.`;
+    }
+
+    const trauma = score ? (score.at_risk_years || []).filter(y => y <= year).length : 0;
+    const traumaNote = trauma > 2 ? ` The institution's stability is challenged by ${trauma} years of repeated conflict exposure.` : " The institution is currently being monitored for stability amidst local security pressures.";
+
+    const rationale = `The ${v_score_display}% risk level at ${name} reflects its proximity to recent violence.${traumaNote}${eduNote}`;
+    
+    textEl.textContent = rationale;
+    textEl.classList.remove("loading");
+    disclaimerEl.innerHTML = "Impact Rationale (Data-Driven)";
+    return;
+  }
+
+  // Gemini API call (similar to Map 1 but education-focused)
+  const GEMINI_MODEL = "gemini-1.5-flash";
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${sessionKey}`;
+  
+  const prompt = `You are a humanitarian infrastructure analyst. 
+School: ${name}, ${province} province, Burkina Faso.
+Current Year: ${year}.
+Analysis: This school has a trauma index of ${(score.at_risk_years || []).filter(y => y <= year).length} years at risk.
+
+Context: Explain in 2 concise sentences how repeated conflict exposure (trauma) impacts the long-term physical and operational integrity of an educational institution like ${name}. Do not use generic filler.`;
+
+  try {
+    const res = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 150, temperature: 0.4 },
+      }),
+    });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Summary unavailable.";
+    
+    textEl.textContent = text;
+    textEl.classList.remove("loading");
+    disclaimerEl.textContent = "AI-generated (Gemini)";
+  } catch(err) {
+    textEl.textContent = "Unable to generate detailed impact analysis.";
+    textEl.classList.remove("loading");
   }
 }
 

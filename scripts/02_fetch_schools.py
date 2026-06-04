@@ -282,7 +282,22 @@ def main():
     osm_gdfs  = []
     hdx_done  = set()
 
-    for iso3, (iso2, hdx_group, cname) in COUNTRIES.items():
+    # Determine target countries
+    target_iso3 = os.environ.get("PIPELINE_ISO3")
+    
+    if target_iso3:
+        target_iso3 = target_iso3.upper()
+        if target_iso3 in COUNTRIES:
+            work_list = {target_iso3: COUNTRIES[target_iso3]}
+        else:
+            print(f"  ⚠ {target_iso3} not in internal registry. Using basic defaults.")
+            # Default to some basic assumptions if ISO3 is unknown
+            work_list = {target_iso3: (target_iso3[:2], target_iso3.lower(), target_iso3)}
+    else:
+        print("No PIPELINE_ISO3 found. Processing full internal registry...")
+        work_list = COUNTRIES
+
+    for iso3, (iso2, hdx_group, cname) in work_list.items():
         print(f"\n[{iso3}] {cname}")
 
         # ── Try HDX first ──────────────────────────────────────────────────

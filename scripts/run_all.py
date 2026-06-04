@@ -75,6 +75,7 @@ STEPS = {
     23: ("06_x_export_conflicts_geojson.py",    "Export Conflict GeoJSON"),
     24: ("07_update_dashboard.py",             "Update Dashboard UI (HTML)"),
     25: ("08_merge_field_notes.py",            "Merge Field Observations"),
+    26: ("09_generate_contextual_stats.py",    "Generate Contextual Stats (Sidecar)"),
 }
 
 

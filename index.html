@@ -766,16 +766,20 @@ path.leaflet-interactive:focus { outline: none !important; }
     <!-- Sidebar -->
     <aside class="sidebar">
 
+      <!-- Chart Panel (Top) -->
+      <div class="panel" style="border-bottom: 1px solid var(--border); background: var(--surface2); flex-shrink: 0; padding: 14px 20px;">
+        <div class="chart-title" id="chartTitle" style="margin-bottom: 8px;">National conflict events · 2015–2026</div>
+        <div style="height: 120px; position: relative;">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+
       <!-- Province detail -->
       <div class="detail-panel" id="detailPanel">
         <div class="panel-label">Province detail</div>
         <p class="detail-empty">
           Select a province on the map to see its vulnerability score and school infrastructure.
         </p>
-        <div class="chart-panel">
-          <div class="chart-title" id="chartTitle">National conflict events · 2015–2026</div>
-          <canvas id="trendChart"></canvas>
-        </div>
       </div>
 
       <!-- Bottom Controls -->
@@ -928,8 +932,16 @@ function saveCache() {
 }
 
 function updateNavLinks() {
-  // ALWAYS point to national view as requested
+  // Sync API key to session storage for Map 2
+  const sessionKey = (document.getElementById("sessionKey")?.value || "").trim();
+  if (sessionKey) {
+    sessionStorage.setItem("GEMINI_API_KEY", sessionKey);
+  }
+  
   let url = `./schools/index.html?year=${currentYear}&iso3=${ISO3}`;
+  if (currentProvince) {
+    url += `&province=${encodeURIComponent(currentProvince)}`;
+  }
   const sLink = document.getElementById("schoolsLink");
   if (sLink) sLink.href = url;
 }
@@ -1007,14 +1019,10 @@ async function loadAll() {
     }
 
     document.getElementById("toggleConflicts").addEventListener("change", renderConflicts);
-    const toggleSchools = document.getElementById("toggleSchools");
-    if (toggleSchools) toggleSchools.addEventListener("change", renderSchools);
 
     map.on('zoomend', () => {
       renderChoropleth(currentYear); // Refresh labels on zoom
       if (document.getElementById("toggleConflicts").checked) renderConflicts();
-      const toggleS = document.getElementById("toggleSchools");
-      if (toggleS && toggleS.checked) renderSchools();
     });
 
     // Auto-select province if in URL
@@ -1049,11 +1057,12 @@ function resetSelection() {
   updateNavLinks();
   resetDetailPanel();
   renderConflicts(); 
-  renderSchools();
   
   // Restore national view generically
   if (choropleth && choropleth.getLayers().length > 0) {
       map.fitBounds(choropleth.getBounds(), { padding: [20, 20] });
+  } else {
+      map.setView([12.3, -1.9], 7);
   }
 
   const newUrl = new URL(window.location);
@@ -1234,7 +1243,6 @@ function renderChoropleth(year) {
           updateNavLinks();
           showProvinceDetail(displayProps);
           renderConflicts();
-          renderSchools();
           
           const newUrl = new URL(window.location);
           newUrl.searchParams.set('province', currentProvince);
@@ -1375,14 +1383,10 @@ function resetDetailPanel() {
   document.getElementById("detailPanel").innerHTML = `
     <div class="panel-label">Province detail</div>
     <p class="detail-empty">Select a province on the map to see its vulnerability score and school infrastructure.</p>
-    <div class="chart-panel">
-      <div class="chart-title" id="chartTitle">National conflict events · 2015–2026</div>
-      <canvas id="trendChart"></canvas>
-    </div>
     ${djHtml}
   `;
 
-  // Re-initialize national trend chart
+  // Update national trend chart
   if (trendsData) {
     drawTrend(trendsData, `National conflict events · ${CONFIG.name} · 2015–2026`);
   }
@@ -1409,60 +1413,12 @@ function showProvinceDetail(props) {
   const securityExposure = (props.conflict_score || 0) * 100;
   const densityFragility = (props.density_fragility || 0.5) * 100;
 
-  // Contextual Stats (Sidecar)
-  const ctxProv = contextualData ? contextualData[name] : null;
-  const ctxYear = ctxProv ? ctxProv[currentYear] : null;
-  
-  let contextHTML = '';
-  if (ctxYear) {
-    const pop = ctxYear.population;
-    const oos = ctxYear.sex_disaggregated.primary_oos;
-    const ger = props.enrolment_raw ? `${props.enrolment_raw.toFixed(0)}%` : "—";
-
-    contextHTML = `
-      <div class="panel-label" style="margin-top:16px; margin-bottom:8px; color: var(--ink);">Demographic Context (${currentYear})</div>
-      <div class="metric-split" style="margin-bottom:8px; background: rgba(26,20,16,0.03); border: 1px solid var(--border);">
-        <div class="split-rows" style="gap:12px;">
-           <div class="split-col">
-             <div class="split-num" style="font-size:14px;">${pop.primary_age.toLocaleString()}</div>
-             <div class="split-source">Age 6-11</div>
-           </div>
-           <div class="split-col">
-             <div class="split-num" style="font-size:14px; color: var(--accent);">${oos.total.toLocaleString()}</div>
-             <div class="split-source">Out of School</div>
-           </div>
-           <div class="split-col">
-             <div class="split-num" style="font-size:14px; color: #B8860B;">${ger}</div>
-             <div class="split-source">GER</div>
-           </div>
-        </div>
-        <div class="metric-label-integrated">Estimated Primary Indicators</div>
-      </div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:12px;">
-         <div class="metric" style="padding: 6px; background: transparent; border: 1px dashed var(--border);">
-            <div class="metric-val" style="font-size:13px;">${oos.female.toLocaleString()}</div>
-            <div class="metric-label" style="font-size:8px;">Female OOS</div>
-         </div>
-         <div class="metric" style="padding: 6px; background: transparent; border: 1px dashed var(--border);">
-            <div class="metric-val" style="font-size:13px;">${oos.male.toLocaleString()}</div>
-            <div class="metric-label" style="font-size:8px;">Male OOS</div>
-         </div>
-      </div>
-    `;
-  }
-
   document.getElementById("detailPanel").innerHTML = `
     <div class="panel-label">Province detail</div>
     <div class="detail-name">${name}</div>
     <div style="margin-bottom: 8px;">
       <span class="detail-tier tier-${tier.replace("_priority","")}">${tierLabel} priority</span>
       <span class="risk-badge">${riskType}</span>
-    </div>
-
-    <!-- Conflict Pulse -->
-    <div class="chart-panel" style="margin-bottom:12px">
-      <div class="chart-title" id="chartTitle">Conflict Pulse</div>
-      <canvas id="trendChart"></canvas>
     </div>
 
     <div class="detail-metrics">
@@ -1484,8 +1440,6 @@ function showProvinceDetail(props) {
         <div class="metric-label">Total Fatalities</div>
       </div>
     </div>
-
-    ${contextHTML}
 
     <div class="score-section">
       <div class="primary-bar-wrap">
@@ -1523,7 +1477,6 @@ function showProvinceDetail(props) {
         <p class="bar-desc">Relative infrastructure gap compared to national standards.</p>
       </div>
     </div>
-
 
     <div class="ai-box" id="aiBox">
       <div class="ai-label">Situation Summary</div>
@@ -1576,30 +1529,27 @@ async function generateSituationBriefing(props) {
   }
 
   if (!sessionKey || sessionKey === "" || sessionKey.length < 10) {
-    const oos = props.oos_raw ? props.oos_raw.toLocaleString() : "systemic";
-    const ger = props.enrolment_raw ? `${props.enrolment_raw}%` : "constrained";
-    const pop = props.school_age_pop ? props.school_age_pop.toLocaleString() : "significant";
-
-    // Extra indicators from the 09 script (contextualData)
-    const ctxProv = contextualData ? contextualData[name] : null;
-    const ctxYear = ctxProv ? ctxProv[year] : null;
-    let genderNote = "";
-    if (ctxYear) {
-      const f_oos = ctxYear.sex_disaggregated.primary_oos.female;
-      const m_oos = ctxYear.sex_disaggregated.primary_oos.male;
-      if (f_oos > m_oos * 1.05) {
-        genderNote = " Girls are disproportionately affected, representing a larger share of those excluded from education.";
-      }
-    }
-
-    const securityNote = events2yr > 20 ? "acute security exposure" : "elevated security risk";
-    const fragilityNote = (props.density_fragility || 0) > 0.6 ? "high structural fragility" : "infrastructure gaps";
+    // ── Concrete Data-Driven Fallback (Map 1) ──
+    const events2yr = props.events_2yr || 0;
+    const fatal2yr  = props.fatalities_2yr || 0;
     
-    const rationale = `In ${name}, out of ${pop} primary-age children, gross enrollment stands at ${ger}. The ${tier} priority classification is driven by ${securityNote} (${events2yr} events in 2yrs) and ${fragilityNote}, impacting ${oos} children out of school.${genderNote}`;
+    // 1. Conflict Density
+    let intensityNote = "stable conditions";
+    if (events2yr > 100) intensityNote = "critical levels of persistent violence";
+    else if (events2yr > 30) intensityNote = "heightened security incidents";
+    else if (events2yr > 10) intensityNote = "sporadic security pressure";
+
+    // 2. Lethality Note
+    let lethalityNote = "";
+    if (fatal2yr > 200) lethalityNote = " with significant casualty rates";
+    else if (fatal2yr > 50) lethalityNote = " with moderate casualty rates";
+
+    // 3. Narrative Synthesis
+    const rationale = `The ${tier} priority classification for ${name} reflects ${intensityNote}${lethalityNote}. This is based on an aggregate of ${events2yr} incidents and ${fatal2yr} fatalities recorded over the 24-month horizon.`;
     
     textEl.textContent = rationale;
     textEl.classList.remove("loading");
-    disclaimerEl.innerHTML = "System Rationale (Data-Driven)";
+    disclaimerEl.innerHTML = "Security Rationale (Data-Driven)";
     return;
   }
 
