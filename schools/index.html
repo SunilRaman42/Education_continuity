@@ -654,13 +654,13 @@ function updateNavLinks() {
 
 function updateSidebarDetail(props) {
     const featureName = props.admin2 || "Unknown";
-    const name = BFA_NAME_MAP[featureName] || featureName;
+    const mappedName = BFA_NAME_MAP[featureName] || featureName;
     const stats = provinceStats[currentYear] || {};
-    const provData = stats[name] || { count: 0 };
+    const provData = stats[featureName] || { count: 0 };
     const schoolsPer1k = props.schools_per_1000 ?? 0;
 
-    // Sidecar Context (indicators from contextualData)
-    const ctxProv = contextualData ? contextualData[name] : null;
+    // Sidecar Context (indicators from contextualData) - Use mappedName for systemic impacts
+    const ctxProv = contextualData ? contextualData[mappedName] : null;
     const ctxYear = ctxProv ? ctxProv[currentYear] : null;
 
     let contextHTML = '';
@@ -712,7 +712,7 @@ function updateSidebarDetail(props) {
 
     document.getElementById("detailPanel").innerHTML = `
       <div class="panel-label">Province detail</div>
-      <div class="detail-name">${name}</div>
+      <div class="detail-name">${featureName}</div>
       <div class="detail-metrics">
         <div class="metric">
           <div class="metric-val">${props.school_count || 0}</div>
@@ -723,7 +723,7 @@ function updateSidebarDetail(props) {
           <div class="metric-label">Schools / 1k</div>
         </div>
         ${provData.count > 0 ? `
-        <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(name)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
+        <a href="at_risk_summary.html?year=${currentYear}&province=${encodeURIComponent(featureName)}&iso3=${ISO3}" class="metric" style="text-decoration:none; cursor:pointer; background: rgba(139,26,26,0.1); border: 1px solid rgba(139,26,26,0.2);">
           <div class="metric-val" style="color: var(--tier-critical); font-weight: bold;">${provData.count}</div>
           <div class="metric-label" style="text-decoration:underline;">At-Risk</div>
         </a>` : `
@@ -1004,7 +1004,8 @@ function updateRiskChart(provinceName) {
   const data = riskTrajectory[provinceName] || riskTrajectory["National"];
   const years = Object.keys(data).sort();
   
-  const critical = years.map(y => data[y].critical);
+  // Total At-Risk = High + Critical
+  const atRisk = years.map(y => (data[y].high || 0) + (data[y].critical || 0));
 
   document.getElementById("chartTitle").textContent = provinceName === "National" ? "National At-Risk Schools Trend" : `${provinceName} At-Risk Schools Trend`;
 
@@ -1039,8 +1040,8 @@ function updateRiskChart(provinceName) {
       labels: years,
       datasets: [
         {
-          label: 'Critical Risk Schools',
-          data: critical,
+          label: 'At-Risk Schools',
+          data: atRisk,
           borderColor: TIER_COLORS.critical,
           backgroundColor: 'transparent',
           borderWidth: 2,

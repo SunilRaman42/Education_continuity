@@ -11,6 +11,7 @@ import json
 import os
 import pandas as pd
 import numpy as np
+import geopandas as gpd
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -46,6 +47,13 @@ def aggregate_at_risk_schools():
         return
     fragility_df = pd.read_csv(fragility_path)
 
+    # Load boundaries for spatial join (to ensure consistent province assignment)
+    admin2_path = Path(f"data/raw/boundaries/{ISO3}_admin2.geojson")
+    if not admin2_path.exists():
+        print(f"✗ Admin2 boundaries missing: {admin2_path}")
+        return
+    boundaries = gpd.read_file(admin2_path)
+
     # 2. Alignment & Mapping
     mapping_path = out_dir / "admin_mapping.json"
     official_to_acled = {}
@@ -54,15 +62,28 @@ def aggregate_at_risk_schools():
             mapping_data = json.load(f)
             official_to_acled = mapping_data.get("official_to_acled", {})
 
-    if "province" not in schools_df.columns:
-        if "Admin2_join" in schools_df.columns:
-            schools_df["province"] = schools_df["Admin2_join"]
-        elif "Admin2" in schools_df.columns:
-            schools_df["province"] = schools_df["Admin2"]
-        else:
-            schools_df["province"] = "Unknown"
+    # Detect admin2 name column in boundaries
+    name_col = next(
+        (c for c in boundaries.columns
+         if any(x in c.lower() for x in ["adm2_en", "adm2_name", "name_2", "shapename", "admin2name"])),
+        boundaries.columns[0]
+    )
 
-    schools_df["Admin2_ACLED"] = schools_df["province"].map(official_to_acled).fillna(schools_df["province"])
+    # Spatial Join to get consistent Province for all schools (Match 06_export_map_data)
+    schools_gdf = gpd.GeoDataFrame(
+        schools_df, 
+        geometry=gpd.points_from_xy(schools_df.longitude, schools_df.latitude),
+        crs="EPSG:4326"
+    )
+    if boundaries.crs != schools_gdf.crs:
+        boundaries = boundaries.to_crs(schools_gdf.crs)
+        
+    joined = gpd.sjoin(schools_gdf, boundaries[[name_col, "geometry"]], how="left", predicate="within")
+    
+    # Assign province using spatial join + ACLED mapping
+    schools_df['province_official'] = joined[name_col].str.strip().str.title().fillna("Unknown")
+    schools_df['province'] = schools_df['province_official'].map(official_to_acled).fillna(schools_df['province_official'])
+    schools_df["Admin2_ACLED"] = schools_df["province"] # Already mapped
 
     # 3. Site-Specific Conflict Exposure
     available_years = sorted(conflicts_df["year"].unique().tolist())

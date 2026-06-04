@@ -191,10 +191,10 @@ def build_province_school_risk(school_scores: list, all_schools_df: pd.DataFrame
         for yr_str in available_years:
             score = float(yearly_scores.get(yr_str, 0))
             
-            # Use the same thresholds as the aggregation script
+            # Thresholds: Critical > 0.7, High > 0.5 (Matches 'At-Risk' count in 06_4)
             category = "stable"
-            if score > 0.6:   category = "critical"
-            elif score > 0.3: category = "high"
+            if score > 0.7:   category = "critical"
+            elif score > 0.5: category = "high"
             
             # Province stats
             if yr_str not in risk_data[prov]:
