@@ -886,7 +886,11 @@ async function init() {
         updateSidebarDetail(match.feature.properties);
         updateRiskChart(currentProvince);
         map.fitBounds(match.getBounds(), { padding: [20, 20], maxZoom: 10 });
+      } else {
+        renderNationalContext();
       }
+    } else {
+      renderNationalContext();
     }
 
     document.getElementById("loadingOverlay").classList.add("hidden");
@@ -913,11 +917,14 @@ async function init() {
             match.setStyle({ weight: 3, color: "#1A1410" });
             updateSidebarDetail(match.feature.properties);
         }
+      } else {
+        renderNationalContext();
       }
 
       renderSchools(schoolsData);
       updateGlobalStats();
       updateRiskChart(currentProvince || "National");
+      updateDiscoveryFeed(schoolsData);
       
       // Re-render school detail if active
       if (activeSchool) {
@@ -963,6 +970,74 @@ function updateGlobalStats() {
   document.getElementById("statSchoolsPer1k").textContent = avgSchoolsPer1k;
 }
 
+function renderNationalContext() {
+    if (!contextualData) return;
+    
+    let totalPop = 0;
+    let totalPrimaryAge = 0;
+    let totalOOS = 0;
+    let totalFemaleOOS = 0;
+    let totalMaleOOS = 0;
+    let weightedGER = 0;
+    let validProvCount = 0;
+
+    for (const prov in contextualData) {
+        const yearData = contextualData[prov][currentYear];
+        if (yearData) {
+            totalPop += yearData.population.total;
+            totalPrimaryAge += yearData.population.primary_age;
+            totalOOS += yearData.sex_disaggregated.primary_oos.total;
+            totalFemaleOOS += yearData.sex_disaggregated.primary_oos.female;
+            totalMaleOOS += yearData.sex_disaggregated.primary_oos.male;
+            
+            // GER proxy calculation from provincial trends
+            const feat = provincialData ? provincialData.features.find(f => f.properties.admin2 === prov && f.properties.year === currentYear) : null;
+            if (feat && feat.properties.enrolment_raw) {
+                weightedGER += feat.properties.enrolment_raw;
+                validProvCount++;
+            }
+        }
+    }
+
+    const avgGER = validProvCount > 0 ? `${(weightedGER / validProvCount).toFixed(0)}%` : "—";
+
+    document.getElementById("detailPanel").innerHTML = `
+      <div class="panel-label">National Summary (${currentYear})</div>
+      <div class="detail-name">${ISO3} National Context</div>
+      <div class="detail-empty" style="margin-bottom:15px;">Select a province or school for localized impact.</div>
+      
+      <div class="detail-metrics" style="grid-template-columns: repeat(3, 1fr); gap: 8px;">
+         <div class="metric" style="padding: 6px;">
+           <div class="metric-val" style="font-size: 14px;">${totalPrimaryAge.toLocaleString()}</div>
+           <div class="metric-label" style="font-size: 7px;">Age 6-11</div>
+         </div>
+         <div class="metric" style="padding: 6px;">
+           <div class="metric-val" style="font-size: 14px; color: var(--accent);">${totalOOS.toLocaleString()}</div>
+           <div class="metric-label" style="font-size: 7px;">OOS Total</div>
+         </div>
+         <div class="metric" style="padding: 6px;">
+           <div class="metric-val" style="font-size: 14px; color: #B8860B;">${avgGER}</div>
+           <div class="metric-label" style="font-size: 7px;">Avg GER</div>
+         </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
+         <div style="background: rgba(232, 63, 111, 0.04); padding: 8px; border-radius: 4px; text-align:center;">
+            <div style="font-family:var(--mono); font-size:12px; font-weight:700; color: #E83F6F;">${totalFemaleOOS.toLocaleString()}</div>
+            <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px;">Female OOS</div>
+         </div>
+         <div style="background: rgba(28, 171, 226, 0.04); padding: 8px; border-radius: 4px; text-align:center;">
+            <div style="font-family:var(--mono); font-size:12px; font-weight:700; color: #1CABE2;">${totalMaleOOS.toLocaleString()}</div>
+            <div style="font-family:var(--mono); font-size:7px; text-transform:uppercase; color:var(--ink-muted); margin-top:2px;">Male OOS</div>
+         </div>
+      </div>
+      
+      <p style="margin-top:12px; font-size:8px; font-family:var(--sans); font-style:italic; color:var(--ink-muted); opacity: 0.8; line-height:1.3; text-align:left;">
+        Aggregated national proxies derived from WorldPop density grids and UNESCO benchmarks extrapolated to ${currentYear}.
+      </p>
+    `;
+}
+
 function resetSelection() {
   const oldLayer = selectedLayer;
   currentProvince = null;
@@ -983,12 +1058,7 @@ function resetSelection() {
       map.setView([12.3, -1.9], 7);
   }
 
-  document.getElementById("detailPanel").innerHTML = `
-    <div class="panel-label">School detail</div>
-    <p class="detail-empty">
-      Zoom in and select a school point to see specific site-level risk metrics.
-    </p>
-  `;
+  renderNationalContext();
   
   const newUrl = new URL(window.location);
   newUrl.searchParams.delete('province');
