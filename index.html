@@ -1035,6 +1035,7 @@ async function loadAll() {
         showProvinceDetail(yrProps ? yrProps.properties : match.feature.properties);
         selectedLayer = match;
         match.setStyle({ weight: 3, color: "#1A1410" });
+        map.fitBounds(match.getBounds(), { padding: [20, 20], maxZoom: 10 });
       }
     }
 

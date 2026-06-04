@@ -588,13 +588,13 @@ const TIER_COLORS = {
   unknown:  "#C8C0B0",
 };
 
-// Naming alignment for Burkina Faso (GeoJSON Name -> CSV Name)
+// Naming alignment for Burkina Faso (GeoJSON Name -> CSV/Context Name)
 const BFA_NAME_MAP = {
-  "Kossin": "Kossi",
-  "Bassitenga": "Oubritenga",
-  "Sandbondtenga": "Sanmatenga",
-  "Djelgodji": "Soum",
-  "Gobnangou": "Tapoa",
+  "Kossi": "Kossin",
+  "Oubritenga": "Bassitenga",
+  "Sanmatenga": "Sandbondtenga",
+  "Soum": "Djelgodji",
+  "Tapoa": "Gobnangou",
   "Seno": "Seno",
   "Yagha": "Yagha"
 };
@@ -608,6 +608,7 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png
 
 let choroplethLayer = null;
 let schoolsLayer    = null;
+let conflictsData   = null;
 let scoreData       = [];
 let schoolsData     = null;
 let provinceStats   = null;
@@ -651,7 +652,8 @@ function updateNavLinks() {
 }
 
 function updateSidebarDetail(props) {
-    const name = props.admin2 || "Unknown";
+    const featureName = props.admin2 || "Unknown";
+    const name = BFA_NAME_MAP[featureName] || featureName;
     const stats = provinceStats[currentYear] || {};
     const provData = stats[name] || { count: 0 };
     const schoolsPer1k = props.schools_per_1000 ?? 0;
@@ -746,14 +748,15 @@ async function init() {
   updateNavLinks();
 
   try {
-    const [geoRes, schoolsRes, scoreRes, provStatsRes, vulnCsvRes, riskTrajRes, contextRes] = await Promise.all([
+    const [geoRes, schoolsRes, scoreRes, provStatsRes, vulnCsvRes, riskTrajRes, contextRes, conflictsRes] = await Promise.all([
       fetch(GEOJSON_URL).then(r => r.json()),
       fetch(SCHOOLS_URL).then(r => r.json()),
       fetch(SCORE_URL).then(r => r.json()),
       fetch(PROV_STATS_URL).then(r => r.json()),
       fetch(VULN_CSV_URL).then(r => r.text()),
       fetch(RISK_TRAJECTORY_URL).then(r => r.json()),
-      fetch(CONTEXTUAL_STATS_URL).then(r => r.json()).catch(() => ({}))
+      fetch(CONTEXTUAL_STATS_URL).then(r => r.json()).catch(() => ({})),
+      fetch(CONFLICTS_URL).then(r => r.json()).catch(() => ({ type: "FeatureCollection", features: [] }))
     ]);
 
     scoreData = scoreRes;
@@ -762,6 +765,7 @@ async function init() {
     riskTrajectory = riskTrajRes;
     contextualData = contextRes;
     provincialData = geoRes;
+    conflictsData = conflictsRes;
 
     updateDiscoveryFeed(schoolsData);
     
@@ -1304,7 +1308,7 @@ function showSchoolDetail(props, latlng) {
       ` : ''}
     `;
 
-    generateSituationBriefing(props, score);
+    generateSituationBriefing(props, score, { conflict: displayConflict, fragility: displayFragility }, latlng);
 
   } catch (err) {
     console.error("Error in showSchoolDetail:", err, props);
@@ -1368,7 +1372,7 @@ function updateDiscoveryFeed(geo) {
 }
 
 
-async function generateSituationBriefing(props, score) {
+async function generateSituationBriefing(props, score, metrics, latlng) {
   const name = props.school_name || props.name || "this institution";
   const province = score ? (score.province || "Unknown") : "Unknown";
   const year = currentYear;
@@ -1384,6 +1388,27 @@ async function generateSituationBriefing(props, score) {
 
   const sessionKey = sessionStorage.getItem("GEMINI_API_KEY");
 
+  // Find nearest conflict event from the data
+  const findNearest = (ll, yr) => {
+    if (!conflictsData || !conflictsData.features.length) return null;
+    let nearest = null, minD = Infinity;
+    conflictsData.features.filter(f => f.properties.year <= yr).forEach(f => {
+      const d = Math.sqrt((ll.lat - f.geometry.coordinates[1])**2 + (ll.lng - f.geometry.coordinates[0])**2);
+      if (d < minD) { minD = d; nearest = f.properties; }
+    });
+    return minD < 0.15 ? nearest : null; // within ~15km
+  };
+
+  const nearestConflict = findNearest(latlng, year);
+  let conflictNote = "";
+  if (nearestConflict) {
+    conflictNote = ` The most relevant recent security incident was recorded in ${nearestConflict.admin2} (${nearestConflict.month}/${nearestConflict.year}) involving ${nearestConflict.fatalities} fatalities.`;
+  }
+
+  const currentTrauma = score ? (score.at_risk_years || []).filter(y => y <= year).length : 0;
+  const currentRiskVal = score ? (score.yearly_scores[year] || 0) : 0;
+  const v_score_display = (currentRiskVal * 100).toFixed(0);
+
   // Fallback: Strict Education/Infrastructure Rationale
   if (!sessionKey || sessionKey.length < 10) {
     const ctxProv = contextualData ? contextualData[province] : null;
@@ -1395,10 +1420,11 @@ async function generateSituationBriefing(props, score) {
       eduNote = ` This facility operates in a region where ${oos.total.toLocaleString()} children are currently out of school.`;
     }
 
-    const trauma = score ? (score.at_risk_years || []).filter(y => y <= year).length : 0;
-    const traumaNote = trauma > 2 ? ` The institution's stability is challenged by ${trauma} years of repeated conflict exposure.` : " The institution is currently being monitored for stability amidst local security pressures.";
+    const traumaNote = currentTrauma > 2 ? ` The institution's stability is challenged by ${currentTrauma} years of repeated conflict exposure.` : " The institution is currently being monitored for stability amidst local security pressures.";
 
-    const rationale = `The ${v_score_display}% risk level at ${name} reflects its proximity to recent violence.${traumaNote}${eduNote}`;
+    const kpiRationale = ` The Site-Level Conflict index of ${metrics.conflict.toFixed(2)} measures the intensity of violence within the immediate catchment area, while the Fragility score of ${metrics.fragility.toFixed(2)} accounts for underlying systemic pressures on local infrastructure.`;
+
+    const rationale = `The ${v_score_display}% risk level at ${name} reflects its proximity to recent violence.${traumaNote}${kpiRationale}${conflictNote}${eduNote}`;
     
     textEl.textContent = rationale;
     textEl.classList.remove("loading");
@@ -1413,9 +1439,13 @@ async function generateSituationBriefing(props, score) {
   const prompt = `You are a humanitarian infrastructure analyst. 
 School: ${name}, ${province} province, Burkina Faso.
 Current Year: ${year}.
-Analysis: This school has a trauma index of ${(score.at_risk_years || []).filter(y => y <= year).length} years at risk.
+Risk Level: ${v_score_display}%.
+Conflict Index: ${metrics.conflict.toFixed(2)}.
+Fragility Score: ${metrics.fragility.toFixed(2)}.
+Trauma Index: ${currentTrauma} years at risk.
+${nearestConflict ? `Recent Incident: ${nearestConflict.month}/${nearestConflict.year} in ${nearestConflict.admin2} (${nearestConflict.fatalities} fatalities).` : ''}
 
-Context: Explain in 2 concise sentences how repeated conflict exposure (trauma) impacts the long-term physical and operational integrity of an educational institution like ${name}. Do not use generic filler.`;
+Context: Explain in 2 concise sentences how this specific combination of conflict pressure and systemic fragility impacts the long-term physical and operational integrity of ${name}. Do not use generic filler.`;
 
   try {
     const res = await fetch(geminiUrl, {
@@ -1441,6 +1471,10 @@ Context: Explain in 2 concise sentences how repeated conflict exposure (trauma) 
 
 
 init();
+</script>
+</body>
+</html>
+nit();
 </script>
 </body>
 </html>
