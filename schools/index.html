@@ -1264,6 +1264,35 @@ function showSchoolDetail(props, latlng) {
     const status = String(props.field_status || "Unknown");
     const statusColor = status === "Open" ? "#2e7d32" : (status === "Closed" ? "#d32f2f" : "#f57c00");
 
+    // Sidecar Context (indicators from contextualData)
+    const ctxProv = contextualData ? contextualData[province] : null;
+    const ctxYear = ctxProv ? ctxProv[currentYear] : null;
+
+    let systemicHTML = '';
+    if (ctxYear) {
+      const pop = ctxYear.population;
+      const oos = ctxYear.sex_disaggregated.primary_oos;
+      const ger = displayEVI ? `${(displayEVI * 100).toFixed(0)}%` : "—"; // Proxy using EVI or original enrolment if available
+
+      systemicHTML = `
+        <div class="panel-label" style="margin-top:10px; margin-bottom:6px">Systemic Context (${currentYear})</div>
+        <div class="detail-metrics" style="grid-template-columns: repeat(3, 1fr); gap: 8px;">
+           <div class="metric" style="padding: 6px;">
+             <div class="metric-val" style="font-size: 14px;">${pop.primary_age.toLocaleString()}</div>
+             <div class="metric-label" style="font-size: 7px;">Age 6-11</div>
+           </div>
+           <div class="metric" style="padding: 6px;">
+             <div class="metric-val" style="font-size: 14px; color: var(--accent);">${oos.total.toLocaleString()}</div>
+             <div class="metric-label" style="font-size: 7px;">OOS Total</div>
+           </div>
+           <div class="metric" style="padding: 6px;">
+             <div class="metric-val" style="font-size: 14px; color: #B8860B;">${ger}</div>
+             <div class="metric-label" style="font-size: 7px;">GER</div>
+           </div>
+        </div>
+      `;
+    }
+
     document.getElementById("detailPanel").innerHTML = `
       <div class="panel-label" style="display:flex; justify-content:space-between; align-items:center;">
          <span>School detail ${isDiscovery ? '<span style="color:#00bcd4; margin-left:5px;">● NEW</span>' : ''}</span>
@@ -1287,6 +1316,8 @@ function showSchoolDetail(props, latlng) {
           <div class="metric-label">Fragility</div>
         </div>
       </div>
+
+      ${systemicHTML}
 
       <div class="ai-box" id="aiBox" style="margin-top: 16px; display: none;">
         <div class="ai-label">Infrastructure Impact</div>
@@ -1416,19 +1447,21 @@ async function generateSituationBriefing(props, score, metrics, latlng) {
     const ctxProv = contextualData ? contextualData[province] : null;
     const ctxYear = ctxProv ? ctxProv[year] : null;
     
-    let eduNote = "";
-    if (ctxYear) {
-      const oos = ctxYear.sex_disaggregated.primary_oos;
-      eduNote = ` This facility operates in a region where ${oos.total.toLocaleString()} children are currently out of school.`;
+    const summaryLines = [
+      `● <b>${v_score_display}% Risk:</b> Reflects proximity to recent violence.`,
+      currentTrauma > 2 ? `● <b>Trauma:</b> ${currentTrauma} years of repeated exposure.` : "● <b>Status:</b> Monitored for local security pressures.",
+      `● <b>Indices:</b> Conflict ${metrics.conflict.toFixed(2)} | Fragility ${metrics.fragility.toFixed(2)}.`
+    ];
+
+    if (nearestConflict) {
+      summaryLines.push(`● <b>Recent:</b> ${nearestConflict.fatalities} fatalities in ${nearestConflict.admin2} (${nearestConflict.month}/${nearestConflict.year}).`);
     }
-
-    const traumaNote = currentTrauma > 2 ? ` The institution's stability is challenged by ${currentTrauma} years of repeated conflict exposure.` : " The institution is currently being monitored for stability amidst local security pressures.";
-
-    const kpiRationale = ` The Site-Level Conflict index of ${metrics.conflict.toFixed(2)} measures the intensity of violence within the immediate catchment area, while the Fragility score of ${metrics.fragility.toFixed(2)} accounts for underlying systemic pressures on local infrastructure.`;
-
-    const rationale = `The ${v_score_display}% risk level at ${name} reflects its proximity to recent violence.${traumaNote}${kpiRationale}${conflictNote}${eduNote}`;
     
-    textEl.textContent = rationale;
+    if (ctxYear) {
+      summaryLines.push(`● <b>Context:</b> ${ctxYear.sex_disaggregated.primary_oos.total.toLocaleString()} children OOS in region.`);
+    }
+    
+    textEl.innerHTML = `<div style="display:flex; flex-direction:column; gap:4px; font-size:11px; line-height:1.4;">${summaryLines.map(l => `<span>${l}</span>`).join('')}</div>`;
     textEl.classList.remove("loading");
     disclaimerEl.innerHTML = "Impact Rationale (Data-Driven)";
     return;
@@ -1447,7 +1480,7 @@ Fragility Score: ${metrics.fragility.toFixed(2)}.
 Trauma Index: ${currentTrauma} years at risk.
 ${nearestConflict ? `Recent Incident: ${nearestConflict.month}/${nearestConflict.year} in ${nearestConflict.admin2} (${nearestConflict.fatalities} fatalities).` : ''}
 
-Context: Explain in 2 concise sentences how this specific combination of conflict pressure and systemic fragility impacts the long-term physical and operational integrity of ${name}. Do not use generic filler.`;
+Context: Explain in ONE succinct sentence how this specific combination of conflict pressure and systemic fragility impacts the long-term physical and operational integrity of ${name}. Be extremely direct.`;
 
   try {
     const res = await fetch(geminiUrl, {
