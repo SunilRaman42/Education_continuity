@@ -1066,6 +1066,7 @@ function resetSelection() {
   }
 
   const newUrl = new URL(window.location);
+  newUrl.searchParams.set('year', currentYear);
   newUrl.searchParams.delete('province');
   window.history.replaceState({}, '', newUrl);
 }
@@ -1273,6 +1274,12 @@ document.getElementById("yearSlider").addEventListener("input", e => {
   currentYear = parseInt(e.target.value);
   document.getElementById("yearDisplay").textContent = currentYear;
   updateNavLinks();
+
+  // Update URL without reload to persist year state
+  const newUrl = new URL(window.location);
+  newUrl.searchParams.set('year', currentYear);
+  window.history.replaceState({}, '', newUrl);
+
   renderChoropleth(currentYear);
   renderConflicts();
 

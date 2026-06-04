@@ -846,6 +846,7 @@ async function init() {
 
             // Update URL without reload
             const newUrl = new URL(window.location);
+            newUrl.searchParams.set('year', currentYear);
             newUrl.searchParams.set('province', currentProvince);
             window.history.replaceState({}, '', newUrl);
           }
